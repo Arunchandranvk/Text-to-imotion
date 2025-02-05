@@ -1,0 +1,32 @@
+{% extends "main.html" %}
+{% block bot %}
+{% load static %}
+
+{% comment %} <body class="bg-gray-100"> {% endcomment %}
+    <div class="container mx-auto px-4 py-8">
+        <h1 class="text-4xl font-bold text-center mb-8">Real-time Emotion Detection</h1>
+        
+        <div class="max-w-3xl mx-auto bg-white rounded-lg shadow-lg p-6">
+            <div class="aspect-w-16 aspect-h-9 mb-4">
+                <img src="{% url 'video_feed' %}" alt="Video Feed" class="w-full h-full object-cover rounded-lg">
+            </div>
+            
+            <div class="mt-4">
+                <h2 class="text-xl font-bold mb-2">Detected Emotions:</h2>
+                <div class="grid grid-cols-7 gap-2">
+                    {% for emotion in emotions %}
+                    <div class="bg-gray-200 p-2 rounded text-center text-sm">
+                        {{ emotion }}
+                    </div>
+                    {% endfor %}
+                </div>
+            </div>
+            
+            <div class="mt-6 text-center text-gray-600">
+                <p>The model will detect faces and classify emotions in real-time.</p>
+                <p class="mt-2">Please ensure your camera is enabled and properly positioned.</p>
+            </div>
+        </div>
+    </div>
+
+{% endblock %}
