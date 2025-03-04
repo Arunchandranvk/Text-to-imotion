@@ -1,0 +1,39 @@
+{% extends "main.html" %}
+{% load static %}
+
+{% block bot %}
+<main class="container mx-auto px-4 py-8">
+    <div class="max-w-4xl mx-auto">
+        <h1 class="text-3xl font-bold mb-6 text-center">Emotion Detection</h1>
+        
+        <div class="bg-white p-6 rounded-lg shadow-lg">
+            <div class="mb-6">
+                <h2 class="text-xl font-semibold mb-3">Live Video Emotion Detection</h2>
+                <p class="text-gray-600 mb-4">
+                    This tool uses YOLOv8 to detect objects and can be extended to detect emotions from facial expressions.
+                </p>
+                
+                <div class="aspect-w-16 aspect-h-9 mb-4">
+                    <img src="{% url 'video_feed_object' %}" alt="Video Feed" class="w-full h-full object-cover rounded-lg">
+                </div>
+            </div>
+            
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mt-6">
+                <div class="bg-gray-50 p-4 rounded-lg">
+                    <h3 class="font-semibold text-lg mb-2">Detected Objects</h3>
+                    <p class="text-sm text-gray-600">
+                        The model will highlight detected objects in the video stream.
+                    </p>
+                </div>
+                
+                <div class="bg-gray-50 p-4 rounded-lg">
+                    <h3 class="font-semibold text-lg mb-2">How it Works</h3>
+                    <p class="text-sm text-gray-600">
+                        The system uses YOLOv8, a state-of-the-art object detection model, to identify objects in real-time video.
+                    </p>
+                </div>
+            </div>
+        </div>
+    </div>
+</main>
+{% endblock %}

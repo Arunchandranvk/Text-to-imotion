@@ -40,6 +40,9 @@
                     <a href="{% url 'emotion' %}" class="hover:text-blue-400 transition uppercase text-sm">
                          Emotion 
                     </a>
+                    <a href="{% url 'object' %}" class="hover:text-blue-400 transition uppercase text-sm">
+                         Object Detection 
+                    </a>
                     <form action="{% url 'logout' %}" method="post" id="logout-button" class="bg-gradient-to-r from-red-600 to-gray-700 text-white px-4 py-2 rounded-lg hover:bg-blue-800 transition uppercase text-sm">
                         {% csrf_token %}
                         Log Out
@@ -68,6 +71,10 @@
                         <a href="{% url 'emotion' %}" class="bg-transparent border-2 border-white text-white px-6 py-3 rounded-lg hover:bg-white hover:text-gray-800 transition flex items-center">
                             <i class="fas fa-video mr-2"></i>
                             Emotion
+                        </a>
+                        <a href="{% url 'object' %}" class="bg-transparent border-2 border-white text-white px-6 py-3 rounded-lg hover:bg-white hover:text-gray-800 transition flex items-center">
+                            <i class="fas fa-image mr-2"></i>
+                            Object Detection
                         </a>
                     </div>
                 </div>

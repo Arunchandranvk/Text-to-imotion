@@ -204,3 +204,113 @@ def emotion_view(request):
 
 def video_feed(request):
     return StreamingHttpResponse(generate_frames(), content_type='multipart/x-mixed-replace; boundary=frame')
+
+
+# views.py
+from django.shortcuts import render
+from django.http import StreamingHttpResponse, HttpResponse
+import cv2
+from ultralytics import YOLO
+import threading
+import time
+
+# Global variables
+model = YOLO("yolov8n.pt")
+camera = None
+lock = threading.Lock()
+
+class VideoCamera:
+    def __init__(self):
+        self.video = cv2.VideoCapture(0)
+        if not self.video.isOpened():
+            raise ValueError("Unable to open video source")
+        
+        # Start background frame grabbing thread
+        self.is_running = True
+        self.thread = threading.Thread(target=self._capture_loop)
+        self.thread.daemon = True
+        self.thread.start()
+        
+        # Store the latest frame
+        self.current_frame = None
+        
+    def _capture_loop(self):
+        while self.is_running:
+            success, frame = self.video.read()
+            if success:
+                with lock:
+                    self.current_frame = frame
+            time.sleep(0.01)  # Small delay to prevent hogging CPU
+    
+    def get_frame(self):
+        with lock:
+            if self.current_frame is None:
+                # Return an error frame if no frame is available
+                blank = cv2.imread('static/images/camera_error.jpg')
+                if blank is None:
+                    # Create a blank image with error text if image not found
+                    blank = 255 * np.ones((480, 640, 3), dtype=np.uint8)
+                    cv2.putText(blank, "Camera Error", (50, 240), 
+                               cv2.FONT_HERSHEY_SIMPLEX, 2, (0, 0, 255), 3)
+                _, jpeg = cv2.imencode('.jpg', blank)
+                return jpeg.tobytes()
+            
+            # Process the frame with YOLO
+            results = model.predict(source=self.current_frame, conf=0.5)
+            annotated_frame = results[0].plot()
+            
+            # Convert to JPEG
+            _, jpeg = cv2.imencode('.jpg', annotated_frame)
+            return jpeg.tobytes()
+    
+    def __del__(self):
+        self.is_running = False
+        if self.thread.is_alive():
+            self.thread.join(timeout=1.0)
+        self.video.release()
+
+# Camera instance
+video_camera = None
+
+def get_cameraa():
+    global video_camera
+    if video_camera is None:
+        try:
+            video_camera = VideoCamera()
+        except Exception as e:
+            print(f"Error initializing camera: {e}")
+            return None
+    return video_camera
+
+def generate_framess():
+    camera = get_cameraa()
+    if camera is None:
+        # Generate error frames if camera fails
+        while True:
+            blank = 255 * np.ones((480, 640, 3), dtype=np.uint8)
+            cv2.putText(blank, "Camera Error", (50, 240), 
+                       cv2.FONT_HERSHEY_SIMPLEX, 2, (0, 0, 255), 3)
+            _, jpeg = cv2.imencode('.jpg', blank)
+            yield (b'--frame\r\n'
+                   b'Content-Type: image/jpeg\r\n\r\n' + jpeg.tobytes() + b'\r\n')
+            time.sleep(1)
+    
+    # Generate frames from the camera
+    while True:
+        frame = camera.get_frame()
+        yield (b'--frame\r\n'
+               b'Content-Type: image/jpeg\r\n\r\n' + frame + b'\r\n')
+        time.sleep(0.03)  # Control frame rate
+
+def video_feed_object(request):
+    # Video streaming route - match this name with your URL pattern
+    return StreamingHttpResponse(
+        generate_framess(),
+        content_type='multipart/x-mixed-replace; boundary=frame'
+    )
+
+# def object_view(request):
+#     # View for rendering the object detection page
+#     return render(request, 'object.html')
+class ObjectView(TemplateView):
+    template_name = 'object.html'
