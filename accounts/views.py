@@ -115,7 +115,7 @@ class ChatbotView(View):
         except Exception as e:
             return JsonResponse({"error": f"Failed to get GROQ response: {str(e)}"})
 
-client = Groq(api_key="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")
+client = Groq(api_key="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")
 
 
 
@@ -208,8 +208,7 @@ def process_frame(frame):
                            cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
                 y_position += 30
                 line = word + " "
-                
-        # Add the last line if there's anything left
+
         if line:
             cv2.putText(frame, line, (20, y_position), 
                        cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
@@ -247,24 +246,63 @@ def video_feed(request):
 model = YOLO("yolov8n.pt")
 camera = None
 lock = threading.Lock()
+detection_active = True  # Flag to control detection status
 
+# Cache for object descriptions to avoid repeated API calls
+object_descriptions = {}
 
+def get_object_description(object_name):
+    """
+    Get a brief description for the detected object using Groq
+    """
+    if object_name in object_descriptions:
+        return object_descriptions[object_name]
+    
+    system_prompt = {
+        "role": "system",
+        "content": "You are a helpful assistant. Provide a brief, informative description (under 30 characters) for the object mentioned."
+    }
+    
+    chat_history = [system_prompt]
+    chat_history.append({"role": "user", "content": f"Describe a {object_name} very briefly."})
+    
+    try:
+        chat_completion = client.chat.completions.create(
+            model="llama3-70b-8192",
+            messages=chat_history,
+            max_tokens=30,  # Limit tokens for shorter responses
+            temperature=0.3  # Lower temperature for more factual responses
+        )
+        
+        description = chat_completion.choices[0].message.content
+        # Clean up the description and keep it short
+        description = description.strip('"\'.,!? ').strip()
+        if len(description) > 30:
+            description = description[:27] + "..."
+        
+        # Store in cache for future use
+        object_descriptions[object_name] = description
+        return description
+        
+    except Exception as e:
+        print(f"Error getting description: {e}")
+        return "Common object"
 
 class VideoCamera:
     def __init__(self):
         self.video = cv2.VideoCapture(0)
         if not self.video.isOpened():
             raise ValueError("Unable to open video source")
-        
+
         # Start background frame grabbing thread
         self.is_running = True
         self.thread = threading.Thread(target=self._capture_loop)
         self.thread.daemon = True
         self.thread.start()
-        
+
         # Store the latest frame
         self.current_frame = None
-        
+
     def _capture_loop(self):
         while self.is_running:
             success, frame = self.video.read()
@@ -272,38 +310,88 @@ class VideoCamera:
                 with lock:
                     self.current_frame = frame
             time.sleep(0.01)  # Small delay to prevent hogging CPU
-    
+
     def get_frame(self):
         with lock:
-            # if self.current_frame is None:
-            #     # Return an error frame if no frame is available
-            #     blank = cv2.imread('static/images/camera_error.jpg')
-            #     if blank is None:
-            #         # Create a blank image with error text if image not found
-            #         blank = 255 * np.ones((480, 640, 3), dtype=np.uint8)
-            #         cv2.putText(blank, "Camera Error", (50, 240), 
-            #                    cv2.FONT_HERSHEY_SIMPLEX, 2, (0, 0, 255), 3)
-            #     _, jpeg = cv2.imencode('.jpg', blank)
-            #     return jpeg.tobytes()
+            if self.current_frame is None:
+                # Return an error frame if no frame is available
+                blank = 255 * np.ones((480, 640, 3), dtype=np.uint8)
+                cv2.putText(blank, "", (50, 240), 
+                           cv2.FONT_HERSHEY_SIMPLEX, 2, (0, 0, 255), 3)
+                _, jpeg = cv2.imencode('.jpg', blank)
+                return jpeg.tobytes()
+
+            # Make a copy of the current frame for annotation
+            annotated_frame = self.current_frame.copy()
             
-            # Process the frame with YOLO
-            results = model.predict(source=self.current_frame, conf=0.5)
-            annotated_frame = results[0].plot()
-            
+            # Only run object detection if detection is active
+            global detection_active
+            if detection_active:
+                # Process the frame with YOLO
+                results = model.predict(source=self.current_frame, conf=0.5)
+                
+                # Draw bounding boxes with descriptions
+                for r in results:
+                    boxes = r.boxes
+                    for box in boxes:
+                        # Extract coordinates and class
+                        x1, y1, x2, y2 = map(int, box.xyxy[0])
+                        cls_id = int(box.cls[0])
+                        conf = float(box.conf[0])
+                        cls_name = model.names[cls_id]
+                        
+                        # Get description for the object
+                        description = get_object_description(cls_name)
+                        
+                        # Draw bounding box
+                        cv2.rectangle(annotated_frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
+                        
+                        # Prepare label text with class name, confidence, and description
+                        label = f"{cls_name} ({conf:.2f}): {description}"
+                        
+                        # Calculate text position
+                        text_size = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 1)[0]
+                        
+                        # Add background for text
+                        cv2.rectangle(annotated_frame, 
+                                     (x1, y1 - text_size[1] - 5), 
+                                     (x1 + text_size[0], y1), 
+                                     (0, 255, 0), 
+                                     -1)
+                        
+                        # Add text
+                        cv2.putText(annotated_frame, 
+                                   label, 
+                                   (x1, y1 - 5),
+                                   cv2.FONT_HERSHEY_SIMPLEX, 
+                                   0.5, 
+                                   (0, 0, 0), 
+                                   1)
+            else:
+                # If detection is not active, add a message to the frame
+                cv2.putText(annotated_frame, 
+                           "Detection Paused", 
+                           (20, 40),
+                           cv2.FONT_HERSHEY_SIMPLEX, 
+                           1, 
+                           (0, 0, 255), 
+                           2)
+
             # Convert to JPEG
             _, jpeg = cv2.imencode('.jpg', annotated_frame)
             return jpeg.tobytes()
-    
+
     def __del__(self):
         self.is_running = False
-        if self.thread.is_alive():
+        if hasattr(self, 'thread') and self.thread.is_alive():
             self.thread.join(timeout=1.0)
-        self.video.release()
+        if hasattr(self, 'video'):
+            self.video.release()
 
 # Camera instance
 video_camera = None
 
-def get_cameraa():
+def get_camera():
     global video_camera
     if video_camera is None:
         try:
@@ -313,39 +401,51 @@ def get_cameraa():
             return None
     return video_camera
 
-def generate_framess():
-    camera = get_cameraa()
+def generate_frame():
+    camera = get_camera()
     if camera is None:
         # Generate error frames if camera fails
         while True:
             blank = 255 * np.ones((480, 640, 3), dtype=np.uint8)
-            cv2.putText(blank, "Camera Error", (50, 240), 
+            cv2.putText(blank, "", (50, 240), 
                        cv2.FONT_HERSHEY_SIMPLEX, 2, (0, 0, 255), 3)
             _, jpeg = cv2.imencode('.jpg', blank)
             yield (b'--frame\r\n'
                    b'Content-Type: image/jpeg\r\n\r\n' + jpeg.tobytes() + b'\r\n')
             time.sleep(1)
-    
+
     # Generate frames from the camera
     while True:
         frame = camera.get_frame()
         yield (b'--frame\r\n'
                b'Content-Type: image/jpeg\r\n\r\n' + frame + b'\r\n')
-        time.sleep(0.03)  # Control frame rate
+        time.sleep(0.03)  
 
 def video_feed_object(request):
-    # Video streaming route - match this name with your URL pattern
     return StreamingHttpResponse(
-        generate_framess(),
+        generate_frame(),
         content_type='multipart/x-mixed-replace; boundary=frame'
     )
 
-# def object_view(request):
-#     # View for rendering the object detection page
-#     return render(request, 'object.html')
+
 class ObjectView(TemplateView):
     template_name = 'object.html'
+
+def toggle_detection(request):
+    """
+    Toggle object detection on/off based on the request parameter
+    """
+    global detection_active
+    action = request.GET.get('action', 'stop')
     
+    if action == 'stop':
+        detection_active = False
+        return JsonResponse({'status': 'success', 'detection': 'stopped'})
+    elif action == 'resume':
+        detection_active = True
+        return JsonResponse({'status': 'success', 'detection': 'resumed'})
+    else:
+        return JsonResponse({'status': 'error', 'message': 'Invalid action'}, status=400)
     
     
 def get_groq_response2(user_input):
@@ -363,18 +463,14 @@ def get_groq_response2(user_input):
     
     system_prompt = {
       "role": "system",
-      "content": "You are a motivational assistant. Provide brief, uplifting responses (under 50 characters) for people based on their detected emotion. Be direct and encouraging."
+      "content": "You are a motivational assistant. Provide brief,  responses (under 10 characters) for people based on their detected emotion. Be direct and encouraging. and also ask question for angry"
     }
 
     chat_history = [system_prompt]
     
-    # Get emotion and sentiment if needed
     emotion = predict_emotion(user_input)
     sentiment = predict_sentiment(user_input)
-    
-    # Append the user input to the chat history
     chat_history.append({"role": "user", "content": user_input + ',' + emotion + ',' + sentiment})
-
     chat_completion = client.chat.completions.create(
         model="llama3-70b-8192",
         messages=chat_history,
@@ -383,7 +479,7 @@ def get_groq_response2(user_input):
     )
 
     response = chat_completion.choices[0].message.content
-    response = re.sub(r'\*\*(.*?)\*\*', r'<b>\1</b>', response)
+    response = re.sub(r'\*\*(.*?)\*\*', r'', response)
     
     # Store in cache for future use
     get_groq_response2.cache[emotion_key] = response
